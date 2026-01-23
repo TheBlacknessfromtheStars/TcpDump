@@ -1,25 +1,27 @@
 package com.azure.tcpdump
 
-import android.content.Context
+import android.app.Application
 import android.content.Intent
+import android.os.Build
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class PacketViewModel : ViewModel() {
+class PacketViewModel(application: Application) : AndroidViewModel(application) {
     private val _packets = MutableStateFlow<List<Packet>>(emptyList())
     val packets = _packets.asStateFlow()
 
     private val _selectedPacket = MutableStateFlow<Packet?>(null)
     val selectedPacket = _selectedPacket.asStateFlow()
 
-    val isCapturing = mutableStateOf(false)
+    var isCapturing = mutableStateOf(false)
+    var isVpnRunning = false
     val filterText = mutableStateOf("")
-
+    val mApplication = getApplication<Application>()
+    
     fun selectPacket(packet: Packet) {
         viewModelScope.launch {
             _selectedPacket.value = packet
@@ -62,11 +64,39 @@ class PacketViewModel : ViewModel() {
         }
     }
 
-    fun startVpnService(context: Context) {
-        val intent = Intent(context, MyVpnService::class.java)
-        context.startService(intent)
-        intent.action = MyVpnService.ACTION_CONNECT
+    fun startVpnService() {
+        if (isVpnRunning)
+            return
+
+        val startVpnIntent = Intent(mApplication.applicationContext, TcpDumpVpnService::class.java).apply {
+            action = TcpDumpVpnService.ACTION_START
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mApplication.applicationContext.startForegroundService(startVpnIntent)
+        } else {
+            mApplication.applicationContext.startService(startVpnIntent)
+        }
+        isVpnRunning = true
+
     }
+
+    fun stopVpnService() {
+        if (!isVpnRunning)
+            return
+
+        val stopVpnIntent = Intent(mApplication.applicationContext, TcpDumpVpnService::class.java).apply {
+            action = TcpDumpVpnService.ACTION_STOP
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mApplication.applicationContext.startForegroundService(stopVpnIntent)
+        } else {
+            mApplication.applicationContext.startService(stopVpnIntent)
+        }
+        isVpnRunning = false
+    }
+
 
     fun loadSampleData() {
         viewModelScope.launch {
