@@ -9,6 +9,12 @@ import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.util.Log
+import com.azure.tcpdump.protocol.IPParser
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import kotlin.concurrent.thread
 
 class TcpDumpVpnService : VpnService() {
     private val mConfigureIntent: PendingIntent by lazy {
@@ -20,10 +26,37 @@ class TcpDumpVpnService : VpnService() {
     }
 
     private lateinit var vpnInterface: ParcelFileDescriptor
+    private var isRunning = true
+
+    private val vpnThread = thread(
+        start = false
+    ) {
+        val readStream = FileInputStream(vpnInterface.fileDescriptor).channel
+        val writeStream = FileOutputStream(vpnInterface.fileDescriptor)
+        val readBuffer = ByteBuffer.allocate(32767)
+
+        while (isRunning) {
+            if (0 < readStream.read(readBuffer)) {
+                try {
+                    readBuffer.flip()
+                    val p = IPParser.createIPPacket(readBuffer)
+                } catch (e: Exception) {
+                    val errorMessage = (e.message ?: e.toString())
+                    Log.e("vpn thread", "$e")
+                }
+
+            }
+        }
+
+        readStream.close()
+        writeStream.close()
+    }
 
     override fun onDestroy() {
         stopForeground(STOP_FOREGROUND_REMOVE)
 
+        isRunning = false
+        vpnThread.join()
         vpnInterface.close()
         super.onDestroy()
     }
@@ -32,13 +65,18 @@ class TcpDumpVpnService : VpnService() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                isRunning = false
+                vpnThread.join()
                 vpnInterface.close()
                 stopSelf()
+
                 return START_NOT_STICKY
             }
             ACTION_START -> {
                 setupVpn()
                 updateForegroundNotification("running")
+
+                vpnThread.start()
 
                 return START_STICKY
             }
@@ -118,7 +156,6 @@ class TcpDumpVpnService : VpnService() {
 
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "TcpDumpVpnService"
-        const val TAG = NOTIFICATION_CHANNEL_ID
         const val ACTION_STOP = "com.azure.tcpdump.ACTION_STOP"
         const val ACTION_START = "com.azure.tcpdump.ACTION_START"
     }
